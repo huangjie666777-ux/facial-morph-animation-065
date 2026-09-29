@@ -88,5 +88,6 @@ export function bakeRetargetedClip(
     name: options.name ?? sourceClip.name + '-retarget',
     duration: sourceClip.duration,
     tracks,
+    ...(sourceClip.morphTracks ? { morphTracks: sourceClip.morphTracks } : {}),
   };
 }

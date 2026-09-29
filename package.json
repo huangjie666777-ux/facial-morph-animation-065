@@ -9,6 +9,7 @@
     "build": "tsc -p tsconfig.json",
     "test": "tsc -p tsconfig.test.json && node --test \"dist-test/test/*.test.js\"",
     "example": "tsc -p tsconfig.test.json && node dist-test/examples/walk-wave.js",
+    "example:face": "tsc -p tsconfig.test.json && node dist-test/examples/facial-expression.js",
     "example:target": "tsc -p tsconfig.test.json && node dist-test/examples/walk-target.js",
     "example:retarget": "tsc -p tsconfig.test.json && node dist-test/examples/retarget.js"
   },

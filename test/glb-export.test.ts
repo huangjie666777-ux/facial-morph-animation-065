@@ -10,6 +10,10 @@ import {
   sampleClip,
   computeWorldMatrices,
   skinVertices,
+  sampleMorphWeights,
+  skinMorphedVertices,
+  type AnimationClip,
+  type MorphTarget,
   type BoneSpec,
   type SkinInfluence,
   type Vec3,
@@ -239,4 +243,91 @@ test('可导出重定向烘焙片段并保留完整层级、片段名和根位�
   assert.ok(Math.abs(hips.position.x - 0.2) < 1e-6);
   assert.ok(Math.abs(hips.position.y - 0.8) < 1e-6);
   assert.ok(gltf.scene.getObjectByName('j_mid'));
+});
+
+test('GLB 保留形变目标顺序名称默认值，并与骨骼动画同时播放', async () => {
+  const targets: MorphTarget[] = [
+    { name: 'smile', displacements: [[0, 0.08, 0], [0, 0, 0.04], [0, 0, -0.04], [0, 0.06, 0]] },
+    { name: 'blink', defaultWeight: 0.15, displacements: [[0, 0, 0.03], [0, 0, 0.02], [0, 0, 0.02], [0, 0, 0.01]] },
+    { name: 'mouth-a', defaultWeight: 0.25, displacements: [[0.01, 0, 0], [0.02, 0, 0], [0.02, 0, 0], [0, 0, 0]] },
+  ];
+  const morphMesh = { ...mesh, targets };
+  const clip: AnimationClip = {
+    name: 'walk-face',
+    duration: 1,
+    tracks: rootMotionWalkClip().tracks,
+    morphTracks: [
+      { targetName: 'smile', keys: [{ time: 0.3, value: 0.2 }, { time: 0.8, value: 1 }] },
+      { targetName: 'blink', keys: [{ time: 0.2, value: 0 }, { time: 1, value: 1 }] },
+      { targetName: 'mouth-a', keys: [{ time: 0.1, value: 0 }, { time: 0.9, value: 1 }] },
+    ],
+  };
+  const buffer = exportCharacterGlb({ skeleton: sk, mesh: morphMesh, clips: [clip] });
+  const gltfJson = parseJson(buffer);
+  const primitive = gltfJson.meshes[0].primitives[0];
+  assert.deepEqual(gltfJson.meshes[0].extras.targetNames, ['smile', 'blink', 'mouth-a']);
+  assert.deepEqual(gltfJson.meshes[0].weights, [0, 0.15, 0.25]);
+  assert.equal(primitive.targets.length, 3);
+
+  const animation = gltfJson.animations[0];
+  const weightsChannel = animation.channels.find((c: any) => c.target.path === 'weights');
+  assert.equal(weightsChannel.target.node, sk.boneIds.length);
+  const sampler = animation.samplers[weightsChannel.sampler];
+  assert.equal(gltfJson.accessors[sampler.output].type, 'SCALAR');
+  assert.equal(gltfJson.accessors[sampler.output].count, 7 * 3);
+
+  const loaded = await parseGlb(buffer.slice(0));
+  const skinned = loaded.scene.children.find((child: any) => child.isSkinnedMesh);
+  const mixer = new AnimationMixer(loaded.scene);
+  const action = mixer.clipAction(loaded.animations[0]);
+  action.setLoop(LoopOnce, 1);
+  action.clampWhenFinished = true;
+  action.play();
+  const time = 0.55;
+  mixer.update(time);
+  loaded.scene.updateMatrixWorld(true);
+  skinned.skeleton.update();
+
+  const localPose = sampleClip(clip, sk, time, 'once');
+  const morphWeights = sampleMorphWeights(clip, targets, time, 'once');
+  const expected = skinMorphedVertices(
+    sk,
+    morphMesh,
+    weights,
+    computeWorldMatrices(sk, localPose),
+    morphWeights,
+  );
+  const influences = skinned.morphTargetInfluences as number[];
+  for (let i = 0; i < positions.length; i++) {
+    const v = new Vector3(positions[i][0], positions[i][1], positions[i][2]);
+    targets.forEach((target, targetIndex) => {
+      const d = target.displacements[i];
+      v.addScaledVector(new Vector3(d[0], d[1], d[2]), influences[targetIndex]);
+    });
+    const out = new Vector3();
+    for (let slot = 0; slot < 4; slot++) {
+      const componentIndex = i * 4 + slot;
+      const joint = skinned.geometry.attributes.skinIndex.array[componentIndex] as number;
+      const weight = skinned.geometry.attributes.skinWeight.array[componentIndex] as number;
+      if (weight === 0) continue;
+      const m = new Matrix4().fromArray(
+        Array.from(skinned.skeleton.boneMatrices.slice(joint * 16, joint * 16 + 16)),
+      );
+      out.addScaledVector(v.clone().applyMatrix4(m), weight);
+    }
+    assert.ok(Math.abs(out.x - expected[i][0]) < 1e-5);
+    assert.ok(Math.abs(out.y - expected[i][1]) < 1e-5);
+    assert.ok(Math.abs(out.z - expected[i][2]) < 1e-5);
+  }
+});
+
+test('拒绝转 Float32 后溢出的有限坐标', () => {
+  assert.throws(
+    () => exportCharacterGlb({
+      skeleton: sk,
+      mesh: { ...mesh, positions: [[1e40, 0, 0], ...positions.slice(1)] },
+      clips: [],
+    }),
+    /Float32/,
+  );
 });

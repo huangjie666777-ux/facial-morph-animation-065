@@ -1,6 +1,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { Skeleton, evaluatePose, skinVertices } from '../src/index.js';
+import { Matrix4 } from 'three';
+import {
+  Skeleton,
+  evaluatePose,
+  skinMorphedVerticesToWorld,
+  skinVertices,
+} from '../src/index.js';
 import { humanoidBones, walkClip, waveClip } from './helpers.js';
 
 const sk = new Skeleton(humanoidBones());
@@ -77,4 +83,26 @@ test('不修改输入，多实例互不串状态', () => {
   assert.deepEqual(outA2, outA);
   // 返回的是新数组
   assert.notEqual(outA[0] as unknown, verts[0] as unknown);
+});
+
+test('世界空间表情形变蒙皮只应用一次角色矩阵', () => {
+  const bindWorld = new Map(sk.boneIds.map((id) => [id, sk.bindWorldMatrix(id)]));
+  const positions = [[0, 1.5, 0]] as [number, number, number][];
+  const mesh = {
+    name: 'face-world',
+    positions,
+    indices: [0, 0, 0] as number[],
+    weights: [[{ boneId: 'head', weight: 1 }]],
+    targets: [{ name: 'blink', displacements: [[0, -0.02, 0.04]] as [number, number, number][] }],
+  };
+  const character = new Matrix4().makeTranslation(2, 3, 4);
+  const out = skinMorphedVerticesToWorld(
+    sk,
+    mesh,
+    mesh.weights,
+    bindWorld,
+    character,
+    new Map([['blink', 0.5]]),
+  );
+  assert.deepEqual(out[0], [2, 4.49, 4.02]);
 });

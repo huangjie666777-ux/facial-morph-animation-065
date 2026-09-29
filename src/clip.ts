@@ -1,5 +1,6 @@
-import type { AnimationClip, BoneTrack, Keyframe, Quat, Vec3 } from './types.js';
+import type { AnimationClip, BoneTrack, Keyframe, MorphTarget, Quat, Vec3 } from './types.js';
 import type { Skeleton } from './skeleton.js';
+import { validateMorphTracks } from './morph.js';
 
 const QUAT_TOLERANCE = 1e-3;
 
@@ -31,7 +32,11 @@ function checkScale(s: Vec3, what: string): void {
 }
 
 /** 校验动画片段与骨架的兼容性，非法时抛错。 */
-export function validateClip(clip: AnimationClip, skeleton: Skeleton): void {
+export function validateClip(
+  clip: AnimationClip,
+  skeleton: Skeleton,
+  morphTargets?: readonly MorphTarget[],
+): void {
   if (!Number.isFinite(clip.duration) || clip.duration <= 0) {
     throw new Error('片段 ' + clip.name + ' 时长必须为正数');
   }
@@ -52,6 +57,7 @@ export function validateClip(clip: AnimationClip, skeleton: Skeleton): void {
     for (const k of track.rotations ?? []) checkQuat(k.value, what + ' 旋转');
     for (const k of track.scales ?? []) checkScale(k.value, what + ' 缩放');
   }
+  if (morphTargets) validateMorphTracks(clip, morphTargets);
 }
 
 /** 在严格递增的关键帧序列上按时间定位并插值。两端外夹取端值。 */

@@ -1,5 +1,14 @@
 import type { TriangleMesh } from './types.js';
 import type { Skeleton } from './skeleton.js';
+import { validateMorphTargets } from './morph.js';
+
+export function assertFloat32Finite(values: Float32Array, what: string): void {
+  for (let i = 0; i < values.length; i++) {
+    if (!Number.isFinite(values[i])) {
+      throw new Error(what + ' 转 Float32 后溢出或变为非有限值 (索引 ' + i + ')');
+    }
+  }
+}
 
 export interface PreparedTriangleMesh {
   readonly name: string;
@@ -8,6 +17,9 @@ export interface PreparedTriangleMesh {
   readonly indices: Uint32Array;
   readonly joints: Uint16Array | Uint32Array;
   readonly weights: Float32Array;
+  readonly targetNames: string[];
+  readonly defaultWeights: number[];
+  readonly targetDisplacements: Float32Array[];
 }
 
 /** 校验并适配三角网格；权重复制到固定四影响布局，不修改输入。 */
@@ -37,6 +49,22 @@ export function prepareTriangleMesh(
     positions[v * 3 + 1] = p[1];
     positions[v * 3 + 2] = p[2];
   }
+  assertFloat32Finite(positions, '顶点位置');
+
+  const targets = validateMorphTargets(mesh);
+  const targetNames = targets.map((target) => target.name);
+  const defaultWeights = targets.map((target) => target.defaultWeight ?? 0);
+  const targetDisplacements = targets.map((target) => {
+    const values = new Float32Array(vertexCount * 3);
+    for (let v = 0; v < vertexCount; v++) {
+      const d = target.displacements[v];
+      values[v * 3] = d[0];
+      values[v * 3 + 1] = d[1];
+      values[v * 3 + 2] = d[2];
+    }
+    assertFloat32Finite(values, '形变目标 ' + target.name + ' 位移');
+    return values;
+  });
 
   const indices = new Uint32Array(mesh.indices.length);
   for (let i = 0; i < mesh.indices.length; i++) {
@@ -97,5 +125,8 @@ export function prepareTriangleMesh(
     indices,
     joints,
     weights,
+    targetNames,
+    defaultWeights,
+    targetDisplacements,
   };
 }

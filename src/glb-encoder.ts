@@ -1,6 +1,10 @@
 import type { Skeleton } from './skeleton.js';
 import type { AnimationClip, GlbCharacterAsset, TriangleMesh } from './types.js';
-import { prepareTriangleMesh, type PreparedTriangleMesh } from './gltf-mesh.js';
+import {
+  assertFloat32Finite,
+  prepareTriangleMesh,
+  type PreparedTriangleMesh,
+} from './gltf-mesh.js';
 import { prepareGlbAnimations, type GltfAnimation } from './gltf-animation.js';
 
 function isSkeletonLike(value: unknown): value is Skeleton {
@@ -159,13 +163,20 @@ export function encodeCharacterGlb(
   const skeleton = asset.skeleton;
   assertSingleRoot(skeleton);
   const preparedMesh: PreparedTriangleMesh = prepareTriangleMesh(skeleton, asset.mesh);
-  const animations: GltfAnimation[] = prepareGlbAnimations(skeleton, asset.clips);
+  const meshNodeIndex = skeleton.evalOrder.length;
+  const animations: GltfAnimation[] = prepareGlbAnimations(
+    skeleton,
+    asset.clips,
+    asset.mesh.targets ?? [],
+    meshNodeIndex,
+  );
 
   const binary = new BinaryWriter();
   const bufferViews: GltfBufferView[] = [];
   const accessors: GltfAccessor[] = [];
 
   const addView = (array: ArrayBufferView, target?: number): number => {
+    if (array instanceof Float32Array) assertFloat32Finite(array, 'GLB Float32 数据');
     const info = componentInfo(array);
     const range = binary.addArray(array, info.componentBytes);
     bufferViews.push({ buffer: 0, ...range, ...(target === undefined ? {} : { target }) });
@@ -196,6 +207,9 @@ export function encodeCharacterGlb(
   const indexAccessor = addAccessor(preparedMesh.indices, 'SCALAR', TARGET_ELEMENT_ARRAY_BUFFER);
   const jointsAccessor = addAccessor(preparedMesh.joints, 'VEC4', TARGET_ARRAY_BUFFER);
   const weightsAccessor = addAccessor(preparedMesh.weights, 'VEC4', TARGET_ARRAY_BUFFER);
+  const targetAccessors = preparedMesh.targetDisplacements.map((values) =>
+    addAccessor(values, 'VEC3', TARGET_ARRAY_BUFFER, true),
+  );
 
   const animationData: {
     animation: GltfAnimation;
@@ -204,9 +218,10 @@ export function encodeCharacterGlb(
   for (const animation of animations) {
     const samplers: { input: number; output: number }[] = [];
     for (const channel of animation.channels) {
-      const stride = channel.path === 'rotation' ? 4 : 3;
       const input = addAccessor(channel.times, 'SCALAR', undefined, true);
-      const output = addAccessor(channel.values, stride === 4 ? 'VEC4' : 'VEC3');
+      const output = channel.path === 'weights'
+        ? addAccessor(channel.values, 'SCALAR')
+        : addAccessor(channel.values, channel.path === 'rotation' ? 'VEC4' : 'VEC3');
       samplers.push({ input, output });
     }
     animationData.push({ animation, samplers });
@@ -233,7 +248,8 @@ export function encodeCharacterGlb(
   });
   const rootIndex = nodeIndex.get(assertSingleRoot(skeleton))!;
 
-  const meshes = [{
+  const gltfTargets = targetAccessors.map((POSITION) => ({ POSITION }));
+  const meshes: Record<string, unknown>[] = [{
     name: preparedMesh.name,
     primitives: [{
       attributes: {
@@ -243,9 +259,11 @@ export function encodeCharacterGlb(
       },
       indices: indexAccessor,
       mode: 4,
+      ...(gltfTargets.length > 0 ? { targets: gltfTargets } : {}),
     }],
+    ...(preparedMesh.defaultWeights.length > 0 ? { weights: preparedMesh.defaultWeights } : {}),
+    ...(preparedMesh.targetNames.length > 0 ? { extras: { targetNames: preparedMesh.targetNames } } : {}),
   }];
-  const meshNodeIndex = nodes.length;
   nodes.push({
     name: preparedMesh.name,
     mesh: 0,

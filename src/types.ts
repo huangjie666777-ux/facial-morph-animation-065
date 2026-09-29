@@ -32,12 +32,30 @@ export interface BoneTrack {
   readonly scales?: readonly Keyframe<Vec3>[];
 }
 
+/** 三角网格的一个命名形变目标。位移与绑定顶点一一对应。 */
+export interface MorphTarget {
+  /** 在同一网格内唯一的目标名称。 */
+  readonly name: string;
+  /** 角色空间位移，数量必须与 TriangleMesh.positions 完全相同。 */
+  readonly displacements: readonly Vec3[];
+  /** 默认权重；缺省为 0，范围 [0, 1]。多个目标独立叠加，不归一化。 */
+  readonly defaultWeight?: number;
+}
+
+/** 按形变目标名称索引的标量权重轨道。 */
+export interface MorphWeightTrack {
+  readonly targetName: string;
+  readonly keys: readonly Keyframe<number>[];
+}
+
 /** 动画片段。 */
 export interface AnimationClip {
   readonly name: string;
   /** 正时长（秒）。 */
   readonly duration: number;
   readonly tracks: readonly BoneTrack[];
+  /** 可选表情权重轨道；缺失轨道在采样时取目标默认权重。 */
+  readonly morphTracks?: readonly MorphWeightTrack[];
 }
 
 /** 播放模式：once 停在末帧；loop 按时长取模。 */
@@ -86,6 +104,8 @@ export interface TriangleMesh {
   readonly indices: readonly number[];
   /** 与 positions 一一对应的蒙皮权重；每顶点至少一个、至多四个非零影响。 */
   readonly weights: readonly (readonly SkinInfluence[])[];
+  /** 可选形变目标，顺序会保留到 glTF morph target。 */
+  readonly targets?: readonly MorphTarget[];
 }
 
 /** 可导出的骨骼蒙皮角色资产。 */
