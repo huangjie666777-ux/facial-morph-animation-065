@@ -1,5 +1,6 @@
 import type { TriangleMesh } from './types.js';
 import type { Skeleton } from './skeleton.js';
+import { assertFloat32Finite, prepareMorphTargets, type PreparedMorphTargets } from './morph.js';
 
 export interface PreparedTriangleMesh {
   readonly name: string;
@@ -8,6 +9,7 @@ export interface PreparedTriangleMesh {
   readonly indices: Uint32Array;
   readonly joints: Uint16Array | Uint32Array;
   readonly weights: Float32Array;
+  readonly morphTargets: PreparedMorphTargets;
 }
 
 /** 校验并适配三角网格；权重复制到固定四影响布局，不修改输入。 */
@@ -33,9 +35,10 @@ export function prepareTriangleMesh(
     if (!p || !p.every(Number.isFinite)) {
       throw new Error('顶点 ' + v + ' 含非法数值');
     }
-    positions[v * 3] = p[0];
-    positions[v * 3 + 1] = p[1];
-    positions[v * 3 + 2] = p[2];
+    for (let component = 0; component < 3; component++) {
+      assertFloat32Finite(p[component], '顶点 ' + v);
+      positions[v * 3 + component] = p[component];
+    }
   }
 
   const indices = new Uint32Array(mesh.indices.length);
@@ -90,6 +93,8 @@ export function prepareTriangleMesh(
     }
   }
 
+  const morphTargets = prepareMorphTargets(mesh);
+
   return {
     name: mesh.name ?? 'character-mesh',
     vertexCount,
@@ -97,5 +102,6 @@ export function prepareTriangleMesh(
     indices,
     joints,
     weights,
+    morphTargets,
   };
 }

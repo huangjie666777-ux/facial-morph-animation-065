@@ -1,4 +1,4 @@
-import type { AnimationClip, BoneTrack, Keyframe, Quat, Vec3 } from './types.js';
+import type { AnimationClip, BoneTrack, Keyframe, MorphTarget, Quat, Vec3 } from './types.js';
 import type { Skeleton } from './skeleton.js';
 
 const QUAT_TOLERANCE = 1e-3;
@@ -31,17 +31,20 @@ function checkScale(s: Vec3, what: string): void {
 }
 
 /** 校验动画片段与骨架的兼容性，非法时抛错。 */
-export function validateClip(clip: AnimationClip, skeleton: Skeleton): void {
+export function validateClip(
+  clip: AnimationClip,
+  skeleton?: Skeleton,
+  morphTargets?: readonly MorphTarget[],
+): void {
   if (!Number.isFinite(clip.duration) || clip.duration <= 0) {
     throw new Error('片段 ' + clip.name + ' 时长必须为正数');
   }
+  const morphTargetNames = new Set((morphTargets ?? []).map((target) => target.name));
   const seen = new Set<string>();
   for (const track of clip.tracks) {
-    if (!skeleton.hasBone(track.boneId)) {
+    if (seen.has(track.boneId)) throw new Error('片段 ' + clip.name + ' 存在重复轨道: ' + track.boneId);
+    if (skeleton && !skeleton.hasBone(track.boneId)) {
       throw new Error('片段 ' + clip.name + ' 引用了未知骨骼: ' + track.boneId);
-    }
-    if (seen.has(track.boneId)) {
-      throw new Error('片段 ' + clip.name + ' 存在重复轨道: ' + track.boneId);
     }
     seen.add(track.boneId);
     const what = '片段 ' + clip.name + ' 骨骼 ' + track.boneId;
@@ -51,6 +54,26 @@ export function validateClip(clip: AnimationClip, skeleton: Skeleton): void {
     for (const k of track.translations ?? []) checkVec3(k.value, what + ' 平移');
     for (const k of track.rotations ?? []) checkQuat(k.value, what + ' 旋转');
     for (const k of track.scales ?? []) checkScale(k.value, what + ' 缩放');
+  }
+  const morphSeen = new Set<string>();
+  for (const track of clip.morphTracks ?? []) {
+    if (morphTargets && !morphTargetNames.has(track.targetName)) {
+      throw new Error('片段 ' + clip.name + ' 引用了未知形变目标: ' + track.targetName);
+    }
+    if (morphSeen.has(track.targetName)) {
+      throw new Error('片段 ' + clip.name + ' 存在重复形变轨道: ' + track.targetName);
+    }
+    morphSeen.add(track.targetName);
+    const what = '片段 ' + clip.name + ' 形变目标 ' + track.targetName;
+    if (!Array.isArray(track.keys) || track.keys.length === 0) {
+      throw new Error(what + ' 至少需要一个权重关键帧');
+    }
+    checkKeys(track.keys, clip.duration, what);
+    for (const key of track.keys) {
+      if (!Number.isFinite(key.value) || key.value < 0 || key.value > 1) {
+        throw new Error(what + ' 权重必须在 [0, 1]: ' + String(key.value));
+      }
+    }
   }
 }
 

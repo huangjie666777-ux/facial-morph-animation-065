@@ -4,6 +4,8 @@ export type {
   BoneSpec,
   Keyframe,
   BoneTrack,
+  MorphTarget,
+  MorphWeightTrack,
   AnimationClip,
   LoopMode,
   LayerSample,
@@ -37,6 +39,16 @@ export {
 } from './pose.js';
 export type { EvaluatedPose } from './pose.js';
 export { skinVertices } from './skinning.js';
+export {
+  assertFloat32Finite,
+  validateMorphTargets,
+  prepareMorphTargets,
+  sampleMorphWeights,
+  applyMorphTargets,
+  skinTriangleMesh,
+  evaluateTriangleMesh,
+} from './morph.js';
+export type { PreparedMorphTargets } from './morph.js';
 export { solveTwoBoneIk } from './ik.js';
 export {
   RootMotion,

@@ -159,7 +159,13 @@ export function encodeCharacterGlb(
   const skeleton = asset.skeleton;
   assertSingleRoot(skeleton);
   const preparedMesh: PreparedTriangleMesh = prepareTriangleMesh(skeleton, asset.mesh);
-  const animations: GltfAnimation[] = prepareGlbAnimations(skeleton, asset.clips);
+  const meshNodeIndex = skeleton.evalOrder.length;
+  const animations: GltfAnimation[] = prepareGlbAnimations(
+    skeleton,
+    asset.clips,
+    meshNodeIndex,
+    preparedMesh.morphTargets,
+  );
 
   const binary = new BinaryWriter();
   const bufferViews: GltfBufferView[] = [];
@@ -196,6 +202,8 @@ export function encodeCharacterGlb(
   const indexAccessor = addAccessor(preparedMesh.indices, 'SCALAR', TARGET_ELEMENT_ARRAY_BUFFER);
   const jointsAccessor = addAccessor(preparedMesh.joints, 'VEC4', TARGET_ARRAY_BUFFER);
   const weightsAccessor = addAccessor(preparedMesh.weights, 'VEC4', TARGET_ARRAY_BUFFER);
+  const morphTargetAccessors = preparedMesh.morphTargets.displacements.map((displacements) =>
+    addAccessor(displacements, 'VEC3', TARGET_ARRAY_BUFFER, true));
 
   const animationData: {
     animation: GltfAnimation;
@@ -204,9 +212,14 @@ export function encodeCharacterGlb(
   for (const animation of animations) {
     const samplers: { input: number; output: number }[] = [];
     for (const channel of animation.channels) {
-      const stride = channel.path === 'rotation' ? 4 : 3;
+      const stride = channel.path === 'rotation'
+        ? 4
+        : channel.path === 'translation' || channel.path === 'scale'
+          ? 3
+          : channel.valueSize ?? 1;
       const input = addAccessor(channel.times, 'SCALAR', undefined, true);
-      const output = addAccessor(channel.values, stride === 4 ? 'VEC4' : 'VEC3');
+      const outputType = channel.path === 'weights' ? 'SCALAR' : stride === 4 ? 'VEC4' : 'VEC3';
+      const output = addAccessor(channel.values, outputType);
       samplers.push({ input, output });
     }
     animationData.push({ animation, samplers });
@@ -233,8 +246,13 @@ export function encodeCharacterGlb(
   });
   const rootIndex = nodeIndex.get(assertSingleRoot(skeleton))!;
 
+  const hasMorphTargets = preparedMesh.morphTargets.targets.length > 0;
   const meshes = [{
     name: preparedMesh.name,
+    ...(hasMorphTargets ? {
+      weights: Array.from(preparedMesh.morphTargets.defaultWeights),
+      extras: { targetNames: preparedMesh.morphTargets.targets.map((target) => target.name) },
+    } : {}),
     primitives: [{
       attributes: {
         POSITION: positionAccessor,
@@ -243,9 +261,11 @@ export function encodeCharacterGlb(
       },
       indices: indexAccessor,
       mode: 4,
+      ...(morphTargetAccessors.length > 0 ? {
+        targets: morphTargetAccessors.map((POSITION) => ({ POSITION })),
+      } : {}),
     }],
   }];
-  const meshNodeIndex = nodes.length;
   nodes.push({
     name: preparedMesh.name,
     mesh: 0,

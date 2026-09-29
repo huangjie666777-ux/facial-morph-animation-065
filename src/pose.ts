@@ -9,7 +9,8 @@ import type {
   Vec3,
 } from './types.js';
 import { sampleKeys, validateClip } from './clip.js';
-import { Skeleton, computeWorldMatrices } from './skeleton.js';
+import { computeWorldMatrices } from './skeleton.js';
+import type { Skeleton } from './skeleton.js';
 import type { Matrix4 } from 'three';
 
 const lerpVec3 = (a: Vec3, b: Vec3, t: number): Vec3 => [
@@ -42,7 +43,7 @@ export function resolveClipTime(time: number, duration: number, loop: LoopMode):
 /** 采样片段得到完整局部姿态；缺失轨道回退到绑定值。 */
 export function sampleClip(
   clip: AnimationClip,
-  skeleton: Skeleton,
+  skeleton: Skeleton | undefined,
   time: number,
   loop: LoopMode,
 ): Map<string, LocalTransform> {
@@ -50,8 +51,8 @@ export function sampleClip(
   const t = resolveClipTime(time, clip.duration, loop);
   const tracks = new Map(clip.tracks.map((tr) => [tr.boneId, tr]));
   const pose = new Map<string, LocalTransform>();
-  for (const id of skeleton.boneIds) {
-    const bind = skeleton.bindLocalTransform(id);
+  for (const id of skeleton?.boneIds ?? []) {
+    const bind = skeleton!.bindLocalTransform(id);
     const track = tracks.get(id);
     pose.set(id, {
       translation: (track && sampleKeys(track.translations ?? [], t, lerpVec3)) ?? bind.translation,

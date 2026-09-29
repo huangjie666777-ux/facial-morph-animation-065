@@ -1,4 +1,5 @@
-import { validateClip } from './clip.js';
+import { sampleKeys, validateClip } from './clip.js';
+import type { PreparedMorphTargets } from './morph.js';
 import type { Skeleton } from './skeleton.js';
 import type { AnimationClip, Keyframe, Quat, Vec3 } from './types.js';
 
@@ -6,9 +7,10 @@ export type GltfAnimationPath = 'translation' | 'rotation' | 'scale';
 
 export interface GltfAnimationChannel {
   readonly nodeIndex: number;
-  readonly path: GltfAnimationPath;
+  readonly path: GltfAnimationPath | 'weights';
   readonly times: Float32Array;
   readonly values: Float32Array;
+  readonly valueSize?: number;
 }
 
 export interface GltfAnimation {
@@ -39,15 +41,51 @@ function expandKeys<T extends readonly number[]>(
   return { times, values };
 }
 
+function assertIncreasingTimes(times: Float32Array, what: string): void {
+  for (let i = 1; i < times.length; i++) {
+    if (!(times[i] > times[i - 1])) throw new Error(what + ' 时间转成 FLOAT32 后不再严格递增');
+  }
+}
+
+function prepareMorphChannel(
+  clip: AnimationClip,
+  meshNodeIndex: number,
+  morph: PreparedMorphTargets,
+): GltfAnimationChannel | undefined {
+  const tracks = clip.morphTracks ?? [];
+  if (tracks.length === 0) return undefined;
+  const byName = new Map(tracks.map((track) => [track.targetName, track]));
+  const timeSet = new Set<number>();
+  timeSet.add(0);
+  timeSet.add(clip.duration);
+  for (const track of tracks) track.keys.forEach((key) => timeSet.add(key.time));
+  const timesSource = [...timeSet].sort((a, b) => a - b);
+  const times = new Float32Array(timesSource);
+  assertIncreasingTimes(times, '片段 ' + clip.name + ' 形变权重');
+  const values = new Float32Array(times.length * morph.targets.length);
+  morph.targets.forEach((target, targetIndex) => {
+    const track = byName.get(target.name);
+    timesSource.forEach((time, timeIndex) => {
+      const value = track
+        ? sampleKeys(track.keys, time, (a, b, t) => a + (b - a) * t) ?? target.defaultWeight ?? 0
+        : target.defaultWeight ?? 0;
+      values[timeIndex * morph.targets.length + targetIndex] = value;
+    });
+  });
+  return { nodeIndex: meshNodeIndex, path: 'weights', times, values, valueSize: morph.targets.length };
+}
+
 /** 把库片段转换为 glTF 节点局部 TRS 通道；不修改输入。 */
 export function prepareGlbAnimations(
   skeleton: Skeleton,
   clips: readonly AnimationClip[],
+  meshNodeIndex: number,
+  morph: PreparedMorphTargets,
 ): GltfAnimation[] {
   if (!Array.isArray(clips)) throw new Error('GLB clips 必须是数组');
   const nodeIndex = new Map(skeleton.evalOrder.map((id, index) => [id, index]));
   return clips.map((clip) => {
-    validateClip(clip, skeleton);
+    validateClip(clip, skeleton, morph.targets);
     const channels: GltfAnimationChannel[] = [];
     for (const track of clip.tracks) {
       const node = nodeIndex.get(track.boneId)!;
@@ -64,6 +102,8 @@ export function prepareGlbAnimations(
         channels.push({ nodeIndex: node, path: 'scale', ...data });
       }
     }
+    const morphChannel = prepareMorphChannel(clip, meshNodeIndex, morph);
+    if (morphChannel) channels.push(morphChannel);
     if (channels.length === 0) {
       const root = skeleton.evalOrder.find(
         (id) => skeleton.parentIndex.get(id) === null,
